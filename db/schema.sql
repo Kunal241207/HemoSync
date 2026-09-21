@@ -1,0 +1,1 @@
+-- Database schema placeholder. Add project tables here.
