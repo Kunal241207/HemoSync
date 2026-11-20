@@ -3,7 +3,6 @@ import cookieParser from 'cookie-parser';
 import { corsMiddleware } from './middleware/cors.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { errorHandler } from './middleware/errorHandler.js';
-import { notFoundHandler } from './middleware/notFound.js';
 import apiRouter from './routes/index.js';
 
 const app = express();
@@ -34,10 +33,16 @@ app.get('/', (req, res) => {
 });
 
 // 404 handler
-app.use(notFoundHandler);
+app.use((req, res, next) => {
+  errorHandler(
+    { status: 404, message: `Route not found: ${req.method} ${req.originalUrl}` },
+    req,
+    res,
+    next
+  );
+});
 
 // Centralized error handler
 app.use(errorHandler);
 
 export default app;
-
