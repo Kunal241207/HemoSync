@@ -43,8 +43,6 @@ function AppContent() {
     );
   }
 
-  // Keep protected routes from being rendered anonymously and preserve the
-  // requested path for navigation after login.
   if (!user) {
     return (
       <Routes>
@@ -56,6 +54,7 @@ function AppContent() {
       </Routes>
     );
   }
+
   const isDev = isDeveloperUser(user);
 
   return (
