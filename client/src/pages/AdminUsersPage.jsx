@@ -25,18 +25,22 @@ export function AdminUsersPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiClient.getAdminUsers();
-      const usersList = res.data || [];
-      setUsers(usersList);
+      const [usersResult, institutionsResult] = await Promise.allSettled([
+        apiClient.getAdminUsers(),
+        apiClient.getInstitutions({ limit: 100 })
+      ]);
 
-      // Extract unique institutions from existing users for dropdown
-      const instMap = new Map();
-      usersList.forEach(u => {
-        if (u.institution) {
-          instMap.set(u.institution.id, u.institution);
-        }
-      });
-      setInstitutions(Array.from(instMap.values()));
+      if (usersResult.status === 'rejected') {
+        throw usersResult.reason;
+      }
+
+      const usersList = usersResult.value.data || [];
+      setUsers(usersList);
+      setInstitutions(
+        institutionsResult.status === 'fulfilled'
+          ? (institutionsResult.value.data?.institutions || institutionsResult.value.data || [])
+          : []
+      );
     } catch (err) {
       setError(err.message || 'Failed to load user directory');
     } finally {

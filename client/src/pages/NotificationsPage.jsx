@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Bell, CheckCheck, Inbox, AlertTriangle, Truck, ClipboardList, Info, Check, RefreshCw } from 'lucide-react';
+import { Bell, CheckCheck, Inbox, AlertTriangle, Truck, ClipboardList, Info, Check, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiClient } from '../services/api';
 
 export function NotificationsPage() {
@@ -193,6 +193,29 @@ export function NotificationsPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+        {!loading && notifications.length > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.75rem', padding: '1rem', borderTop: '1px solid var(--border)' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              Page {pagination.page} of {pagination.totalPages}
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => fetchNotifications(pagination.page - 1)}
+              disabled={pagination.page <= 1}
+            >
+              <ChevronLeft size={14} /> Previous
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => fetchNotifications(pagination.page + 1)}
+              disabled={pagination.page >= pagination.totalPages}
+            >
+              Next <ChevronRight size={14} />
+            </button>
           </div>
         )}
       </div>

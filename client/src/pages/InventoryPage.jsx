@@ -67,12 +67,19 @@ export function InventoryPage() {
       if (eligibleOnly) params.isEligible = 'true';
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
-      const [invRes, sumRes] = await Promise.all([
-        apiClient.getInventory(params),
-        apiClient.getInventorySummary()
-      ]);
+      const limit = 100;
+      const inventoryPages = [];
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const invRes = await apiClient.getInventory({ ...params, page, limit });
+        inventoryPages.push(...(invRes.data?.units || []));
+        totalPages = invRes.data?.pagination?.totalPages || 1;
+        page += 1;
+      } while (page <= totalPages);
 
-      setUnits(invRes.data?.units || []);
+      const sumRes = await apiClient.getInventorySummary();
+      setUnits(inventoryPages);
       setSummary(sumRes.data || null);
     } catch (err) {
       setError(err.message || 'Failed to load inventory');

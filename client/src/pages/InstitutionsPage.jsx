@@ -53,7 +53,7 @@ export function InstitutionsPage() {
       }
 
       const res = await apiClient.getInstitutions(params);
-      setInstitutions(res.data || []);
+      setInstitutions(res.data?.institutions || (Array.isArray(res.data) ? res.data : []));
     } catch (err) {
       setError(err.message || 'Failed to fetch participating institutions');
     } finally {

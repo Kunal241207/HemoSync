@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Plus, RefreshCw, AlertCircle, AlertTriangle, Clock, ClipboardList, CheckCircle2, Truck, ArrowRight, MapPin, X, Check, MessageSquare, Timer, CalendarClock, Droplet, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import apiClient from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -7,6 +7,7 @@ import StatusBadge from '../components/common/StatusBadge';
 
 export function RequestsPage() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isHospitalStaff = user?.role === 'HOSPITAL_STAFF';
   const isBloodBankStaff = user?.role === 'BLOOD_BANK_STAFF';
   const isAdmin = user?.role === 'PLATFORM_ADMIN';
@@ -78,10 +79,24 @@ export function RequestsPage() {
       params.page = currentPage;
       params.limit = pageSize;
 
+      const institutionPromise = isAdmin
+        ? apiClient.getInstitutions({ limit: 100 }).catch(() => ({ data: { institutions: [] } }))
+        : Promise.resolve({
+            data: {
+              institutions: user?.institutionId
+                ? [{
+                    id: user.institutionId,
+                    name: user.institution?.name || 'My Institution',
+                    type: user.institution?.type || (isHospitalStaff ? 'HOSPITAL' : 'BLOOD_BANK')
+                  }]
+                : []
+            }
+          });
+
       const [requestsRes, summaryRes, instRes] = await Promise.all([
         apiClient.getRequests(params),
         apiClient.getRequestSummary(),
-        apiClient.getInstitutions({ limit: 50 }).catch(() => ({ data: { institutions: [] } }))
+        institutionPromise
       ]);
 
       const requestData = requestsRes?.data || {};
@@ -93,13 +108,13 @@ export function RequestsPage() {
         totalPages: 1
       });
       setSummary(summaryRes?.data || null);
-      setInstitutions(instRes?.data?.institutions || []);
+      setInstitutions(instRes?.data?.institutions || (Array.isArray(instRes?.data) ? instRes.data : []));
     } catch (err) {
       setError(err.message || 'Failed to load blood requests');
     } finally {
       setLoading(false);
     }
-  }, [componentFilter, urgencyFilter, statusFilter, searchTerm, currentPage, pageSize]);
+  }, [componentFilter, urgencyFilter, statusFilter, searchTerm, currentPage, pageSize, isAdmin, isHospitalStaff, user?.institutionId, user?.institution?.name, user?.institution?.type]);
 
   useEffect(() => {
     fetchData();
@@ -167,7 +182,9 @@ export function RequestsPage() {
       setIsDetailModalOpen(true);
       // Auto-fetch matches for open requests
       if (!['FULFILLED', 'CANCELLED', 'UNFULFILLED'].includes(res.data.status)) {
-        const initialInst = isBloodBankStaff && user?.institutionId ? user.institutionId : res.data.hospitalId;
+        const initialInst = !isAdmin && user?.institutionId
+          ? user.institutionId
+          : (isBloodBankStaff && user?.institutionId ? user.institutionId : res.data.hospitalId);
         setMatchingInstitutionId(initialInst);
         fetchMatches(reqId, initialInst);
         fetchNearbyMatches(reqId);
@@ -182,7 +199,15 @@ export function RequestsPage() {
     }
   };
 
+  useEffect(() => {
+    const selectedView = searchParams.get('view');
+    if (selectedView) {
+      handleOpenDetails(selectedView);
+    }
+  }, [searchParams]);
+
   const handleMatchingInstitutionChange = (newInstId) => {
+    if (!isAdmin && user?.institutionId && newInstId !== user.institutionId) return;
     setMatchingInstitutionId(newInstId);
     if (selectedRequest) {
       fetchMatches(selectedRequest.id, newInstId);
@@ -920,7 +945,19 @@ export function RequestsPage() {
                 {getUrgencyBadge(selectedRequest.urgency)}
                 <StatusBadge status={selectedRequest.status} label={selectedRequest.status.replace(/_/g, ' ')} />
               </div>
-              <button className="btn-close" onClick={() => setIsDetailModalOpen(false)}>×</button>
+              <button
+                className="btn-close"
+                onClick={() => {
+                  setIsDetailModalOpen(false);
+                  if (searchParams.has('view')) {
+                    const nextParams = new URLSearchParams(searchParams);
+                    nextParams.delete('view');
+                    setSearchParams(nextParams);
+                  }
+                }}
+              >
+                ×
+              </button>
             </div>
 
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -1021,6 +1058,7 @@ export function RequestsPage() {
                         className="form-control"
                         value={matchingInstitutionId}
                         onChange={(e) => handleMatchingInstitutionChange(e.target.value)}
+                        disabled={!isAdmin}
                         style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem', width: '220px' }}
                       >
                         {institutions.map((inst) => (

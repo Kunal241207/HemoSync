@@ -23,6 +23,7 @@ export function HomePage() {
   const [alerts, setAlerts] = useState([]);
   const [openRequests, setOpenRequests] = useState([]);
   const [activeTransfers, setActiveTransfers] = useState([]);
+  const [expiryAlertTotal, setExpiryAlertTotal] = useState(0);
   const [forecast, setForecast] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
   const [allocatingId, setAllocatingId] = useState(null);
@@ -34,11 +35,14 @@ export function HomePage() {
 
   const loadDashboardData = useCallback(async () => {
     try {
-      const [invRes, reqRes, alertRes, transRes, foreRes] = await Promise.all([
+      const [invRes, pendingReqRes, partialReqRes, alertRes, requestedTransRes, approvedTransRes, dispatchedTransRes, foreRes] = await Promise.all([
         apiClient.getInventorySummary().catch(() => ({ data: null })),
-        apiClient.getRequests({ status: 'PENDING,PARTIALLY_ALLOCATED', limit: 8 }).catch(() => ({ data: { requests: [] } })),
+        apiClient.getRequests({ status: 'PENDING', limit: 8 }).catch(() => ({ data: { requests: [] } })),
+        apiClient.getRequests({ status: 'PARTIALLY_ALLOCATED', limit: 8 }).catch(() => ({ data: { requests: [] } })),
         apiClient.getExpiryAlerts({ resolved: 'false', limit: 5 }).catch(() => ({ data: { alerts: [] } })),
-        apiClient.getTransfers({ status: 'REQUESTED,APPROVED,DISPATCHED', limit: 5 }).catch(() => ({ data: { transfers: [] } })),
+        apiClient.getTransfers({ status: 'REQUESTED', limit: 5 }).catch(() => ({ data: { transfers: [] } })),
+        apiClient.getTransfers({ status: 'APPROVED', limit: 5 }).catch(() => ({ data: { transfers: [] } })),
+        apiClient.getTransfers({ status: 'DISPATCHED', limit: 5 }).catch(() => ({ data: { transfers: [] } })),
         apiClient.getSimpleForecast().catch(() => ({ data: null }))
       ]);
 
@@ -56,8 +60,8 @@ export function HomePage() {
         totalAvailable = invData.totalUnits || Object.values(typeMap).reduce((a, b) => a + b, 0);
       } else {
         // Fallback: calculate from raw units
-        const unitsRes = await apiClient.getInventory({ limit: 100, inventoryStatus: 'AVAILABLE' }).catch(() => ({ data: { bloodUnits: [] } }));
-        const units = unitsRes?.data?.bloodUnits || [];
+        const unitsRes = await apiClient.getInventory({ limit: 100, inventoryStatus: 'AVAILABLE' }).catch(() => ({ data: { units: [] } }));
+        const units = unitsRes?.data?.units || [];
         totalAvailable = units.length;
         units.forEach((u) => {
           const typeKey = `${u.aboGroup}${u.rhFactor === 'POSITIVE' ? '+' : '-'}`;
@@ -65,10 +69,26 @@ export function HomePage() {
         });
       }
 
+      const openRequestMap = new Map();
+      [...(pendingReqRes?.data?.requests || []), ...(partialReqRes?.data?.requests || [])].forEach((request) => {
+        openRequestMap.set(request.id, request);
+      });
+      const openRequests = [...openRequestMap.values()].slice(0, 8);
+
+      const activeTransferMap = new Map();
+      [
+        ...(requestedTransRes?.data?.transfers || []),
+        ...(approvedTransRes?.data?.transfers || []),
+        ...(dispatchedTransRes?.data?.transfers || [])
+      ].forEach((transfer) => {
+        activeTransferMap.set(transfer.id, transfer);
+      });
+
       setInventoryStats({ totalAvailable, byType: typeMap });
-      setOpenRequests(reqRes?.data?.requests || []);
+      setOpenRequests(openRequests);
       setAlerts(alertRes?.data?.alerts || []);
-      setActiveTransfers(transRes?.data?.transfers || []);
+      setExpiryAlertTotal(alertRes?.data?.pagination?.total ?? (alertRes?.data?.alerts || []).length);
+      setActiveTransfers([...activeTransferMap.values()].slice(0, 5));
       setForecast(foreRes?.data?.forecast || null);
     } catch (err) {
       console.error('Failed to load dashboard metrics:', err);
@@ -126,7 +146,7 @@ export function HomePage() {
     );
   }
 
-  const expiringCount = alerts.length;
+  const expiringCount = expiryAlertTotal;
   const emergencyCount = openRequests.filter((r) => r.urgency === 'EMERGENCY').length;
 
   return (
