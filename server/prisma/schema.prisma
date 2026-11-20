@@ -1,0 +1,455 @@
+// HemoSync Complete PostgreSQL Database Schema
+// Normalized, Auditable Healthcare Blood Inventory & Logistics Design
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------
+// ENUMS
+// ----------------------------------------------------
+
+enum InstitutionType {
+  HOSPITAL
+  BLOOD_BANK
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  SUSPENDED
+}
+
+enum UserRole {
+  PLATFORM_ADMIN
+  HOSPITAL_STAFF
+  BLOOD_BANK_STAFF
+}
+
+enum BloodComponentType {
+  RED_BLOOD_CELLS
+  PLATELETS
+  PLASMA
+}
+
+enum AboGroup {
+  A
+  B
+  AB
+  O
+}
+
+enum RhFactor {
+  POSITIVE
+  NEGATIVE
+}
+
+enum TestingStatus {
+  PENDING
+  PASSED
+  FAILED
+}
+
+enum ReleaseStatus {
+  QUARANTINED
+  RELEASED
+  REJECTED
+}
+
+enum InventoryStatus {
+  AVAILABLE
+  RESERVED
+  IN_TRANSFER
+  TRANSFERRED
+  USED
+  EXPIRED
+  DISCARDED
+  QUARANTINED
+}
+
+enum RequestUrgency {
+  ROUTINE
+  URGENT
+  EMERGENCY
+}
+
+enum RequestStatus {
+  PENDING
+  VALIDATED
+  PARTIALLY_ALLOCATED
+  ALLOCATED
+  TRANSFER_PENDING
+  FULFILLED
+  CANCELLED
+  UNFULFILLED
+}
+
+enum AllocationStatus {
+  RESERVED
+  FULFILLED
+  CANCELLED
+}
+
+enum TransferStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  RESERVED
+  DISPATCHED
+  RECEIVED
+  CANCELLED
+  FAILED
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum EventType {
+  REGISTRATION
+  STATUS_CHANGE
+  DISPATCH
+  RECEIPT
+  DISPOSAL
+  QUARANTINE_APPLIED
+  TEST_COMPLETED
+  ALLOCATION_RESERVED
+  ALLOCATION_RELEASED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  ALLOCATE
+  TRANSFER_REQUEST
+  TRANSFER_APPROVE
+  TRANSFER_DISPATCH
+  TRANSFER_RECEIVE
+  STATUS_CHANGE
+}
+
+// ----------------------------------------------------
+// 1. INSTITUTION
+// ----------------------------------------------------
+model Institution {
+  id                 String             @id @default(uuid())
+  name               String
+  type               InstitutionType
+  address            String
+  latitude           Float
+  longitude          Float
+  licenseNumber      String             @unique @map("license_number")
+  phone              String?
+  email              String?
+  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
+  isActive           Boolean            @default(true) @map("is_active")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  // Relationships
+  users               User[]
+  bloodUnits          BloodUnit[]
+  bloodRequests       BloodRequest[]
+  outgoingTransfers   Transfer[]        @relation("SourceInstitution")
+  incomingTransfers   Transfer[]        @relation("DestinationInstitution")
+  expiryAlerts        ExpiryAlert[]
+  demandForecasts     DemandForecast[]
+  auditLogs           AuditLog[]
+
+  @@index([type, verificationStatus, isActive])
+  @@map("institutions")
+}
+
+// ----------------------------------------------------
+// 2. USER
+// ----------------------------------------------------
+model User {
+  id            String    @id @default(uuid())
+  institutionId String?   @map("institution_id")
+  name          String
+  email         String    @unique
+  passwordHash  String    @map("password_hash")
+  role          UserRole
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relationships
+  institution       Institution?     @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+  createdRequests   BloodRequest[]
+  allocations       Allocation[]
+  approvedTransfers Transfer[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  inventoryEvents   InventoryEvent[]
+
+  @@index([institutionId, role])
+  @@map("users")
+}
+
+// ----------------------------------------------------
+// 3. BLOOD UNIT
+// ----------------------------------------------------
+model BloodUnit {
+  id              String             @id @default(uuid())
+  institutionId   String             @map("institution_id")
+  unitCode        String             @unique @map("unit_code")
+  componentType   BloodComponentType @map("component_type")
+  aboGroup        AboGroup           @map("abo_group")
+  rhFactor        RhFactor           @map("rh_factor")
+  collectionDate  DateTime           @map("collection_date")
+  expiryDate      DateTime           @map("expiry_date")
+  volumeMl        Int                @map("volume_ml")
+  testingStatus   TestingStatus      @default(PENDING) @map("testing_status")
+  releaseStatus   ReleaseStatus      @default(QUARANTINED) @map("release_status")
+  inventoryStatus InventoryStatus    @default(AVAILABLE) @map("inventory_status")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  // Relationships
+  institution     Institution        @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  allocations     Allocation[]
+  transferUnits   TransferUnit[]
+  expiryAlerts    ExpiryAlert[]
+  inventoryEvents InventoryEvent[]
+
+  @@index([institutionId, inventoryStatus])
+  @@index([componentType, aboGroup, rhFactor])
+  @@index([expiryDate])
+  @@index([inventoryStatus, releaseStatus, testingStatus])
+  @@map("blood_units")
+}
+
+// ----------------------------------------------------
+// 4. BLOOD REQUEST
+// ----------------------------------------------------
+model BloodRequest {
+  id                 String             @id @default(uuid())
+  hospitalId         String             @map("hospital_id")
+  createdById        String             @map("created_by_id")
+  requestedComponent BloodComponentType @map("requested_component")
+  requestedABO       AboGroup           @map("requested_abo")
+  requestedRh        RhFactor           @map("requested_rh")
+  requestedQuantity  Int                @map("requested_quantity")
+  urgency            RequestUrgency     @default(ROUTINE)
+  status             RequestStatus      @default(PENDING)
+  requiredBy         DateTime           @map("required_by")
+  reason             String?
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  // Relationships
+  hospital    Institution  @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  createdBy   User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  allocations Allocation[]
+  transfers   Transfer[]
+
+  @@index([hospitalId, status])
+  @@index([requiredBy])
+  @@index([urgency])
+  @@map("blood_requests")
+}
+
+// ----------------------------------------------------
+// 5. ALLOCATION
+// ----------------------------------------------------
+model Allocation {
+  id            String           @id @default(uuid())
+  requestId     String           @map("request_id")
+  bloodUnitId   String           @map("blood_unit_id")
+  allocatedById String           @map("allocated_by_id")
+  status        AllocationStatus @default(RESERVED)
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  // Relationships
+  request     BloodRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  bloodUnit   BloodUnit    @relation(fields: [bloodUnitId], references: [id], onDelete: Cascade)
+  allocatedBy User         @relation(fields: [allocatedById], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@index([bloodUnitId, status])
+  @@map("allocations")
+}
+
+// ----------------------------------------------------
+// 6. TRANSFER
+// ----------------------------------------------------
+model Transfer {
+  id                       String         @id @default(uuid())
+  sourceInstitutionId      String         @map("source_institution_id")
+  destinationInstitutionId String         @map("destination_institution_id")
+  requestId                String?        @map("request_id")
+  status                   TransferStatus @default(REQUESTED)
+  approvedById             String?        @map("approved_by_id")
+  dispatchedAt             DateTime?      @map("dispatched_at")
+  receivedAt               DateTime?      @map("received_at")
+  notes                    String?
+  createdAt                DateTime       @default(now()) @map("created_at")
+  updatedAt                DateTime       @updatedAt @map("updated_at")
+
+  // Relationships
+  sourceInstitution      Institution    @relation("SourceInstitution", fields: [sourceInstitutionId], references: [id], onDelete: Cascade)
+  destinationInstitution Institution    @relation("DestinationInstitution", fields: [destinationInstitutionId], references: [id], onDelete: Cascade)
+  request                BloodRequest?  @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  approvedBy             User?          @relation(fields: [approvedById], references: [id], onDelete: SetNull)
+  transferUnits          TransferUnit[]
+
+  @@index([sourceInstitutionId, status])
+  @@index([destinationInstitutionId, status])
+  @@index([requestId])
+  @@map("transfers")
+}
+
+// ----------------------------------------------------
+// 7. TRANSFER UNIT
+// ----------------------------------------------------
+model TransferUnit {
+  id          String   @id @default(uuid())
+  transferId  String   @map("transfer_id")
+  bloodUnitId String   @map("blood_unit_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relationships
+  transfer  Transfer  @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  bloodUnit BloodUnit @relation(fields: [bloodUnitId], references: [id], onDelete: Cascade)
+
+  @@unique([transferId, bloodUnitId])
+  @@index([bloodUnitId])
+  @@map("transfer_units")
+}
+
+// ----------------------------------------------------
+// 8. EXPIRY ALERT
+// ----------------------------------------------------
+model ExpiryAlert {
+  id            String        @id @default(uuid())
+  bloodUnitId   String        @map("blood_unit_id")
+  institutionId String        @map("institution_id")
+  severity      AlertSeverity @default(MEDIUM)
+  resolved      Boolean       @default(false)
+  resolvedAt    DateTime?     @map("resolved_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  // Relationships
+  bloodUnit   BloodUnit   @relation(fields: [bloodUnitId], references: [id], onDelete: Cascade)
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@index([institutionId, resolved])
+  @@index([bloodUnitId])
+  @@map("expiry_alerts")
+}
+
+// ----------------------------------------------------
+// 9. NOTIFICATION
+// ----------------------------------------------------
+model Notification {
+  id              String    @id @default(uuid())
+  recipientUserId String    @map("recipient_user_id")
+  title           String
+  message         String
+  readAt          DateTime? @map("read_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  // Relationships
+  recipientUser User @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  @@index([recipientUserId, readAt])
+  @@map("notifications")
+}
+
+// ----------------------------------------------------
+// 10. DEMAND FORECAST
+// ----------------------------------------------------
+model DemandForecast {
+  id              String             @id @default(uuid())
+  institutionId   String             @map("institution_id")
+  componentType   BloodComponentType @map("component_type")
+  aboGroup        AboGroup?          @map("abo_group")
+  rhFactor        RhFactor?          @map("rh_factor")
+  forecastDate    DateTime           @map("forecast_date")
+  horizonDays     Int                @default(7) @map("horizon_days")
+  predictedDemand Float              @map("predicted_demand")
+  lowerBound      Float              @map("lower_bound")
+  upperBound      Float              @map("upper_bound")
+  modelVersion    String             @default("v1.0-ewma") @map("model_version")
+  metrics         Json?
+  generatedAt     DateTime           @default(now()) @map("generated_at")
+
+  // Relationships
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@index([institutionId, componentType, forecastDate])
+  @@map("demand_forecasts")
+}
+
+// ----------------------------------------------------
+// 11. AUDIT LOG
+// ----------------------------------------------------
+model AuditLog {
+  id            String      @id @default(uuid())
+  actorId       String?     @map("actor_id")
+  institutionId String?     @map("institution_id")
+  entityType    String      @map("entity_type")
+  entityId      String      @map("entity_id")
+  action        AuditAction
+  metadata      Json?
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  // Relationships
+  actor       User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  institution Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+
+  @@index([institutionId, createdAt])
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@map("audit_logs")
+}
+
+// ----------------------------------------------------
+// 12. INVENTORY EVENT
+// ----------------------------------------------------
+model InventoryEvent {
+  id             String           @id @default(uuid())
+  bloodUnitId    String           @map("blood_unit_id")
+  eventType      EventType        @map("event_type")
+  previousStatus InventoryStatus? @map("previous_status")
+  newStatus      InventoryStatus  @map("new_status")
+  actorId        String?          @map("actor_id")
+  notes          String?
+  timestamp      DateTime         @default(now())
+
+  // Relationships
+  bloodUnit BloodUnit @relation(fields: [bloodUnitId], references: [id], onDelete: Cascade)
+  actor     User?     @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([bloodUnitId, timestamp])
+  @@map("inventory_events")
+}
+
+// ----------------------------------------------------
+// SYSTEM SETTINGS
+// ----------------------------------------------------
+model SystemSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
